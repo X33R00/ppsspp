@@ -49,8 +49,9 @@ void GenerateDepalShader300(char *buffer, GEBufferFormat pixelFormat, ShaderLang
 		if (gl_extensions.IsGLES) {
 			WRITE(p, "#version 300 es\n");
 			WRITE(p, "precision mediump float;\n");
+			WRITE(p, "precision highp int;\n");
 		} else {
-			WRITE(p, "#version 330\n");
+			WRITE(p, "#version %d\n", gl_extensions.GLSLVersion());
 		}
 		WRITE(p, "in vec2 v_texcoord0;\n");
 		WRITE(p, "out vec4 fragColor0;\n");
@@ -113,7 +114,7 @@ void GenerateDepalShader300(char *buffer, GEBufferFormat pixelFormat, ShaderLang
 		texturePixels = 512;
 
 	if (shift) {
-		WRITE(p, "  index = (int(uint(index) >> %i) & 0x%02x)", shift, mask);
+		WRITE(p, "  index = (int(uint(index) >> uint(%i)) & 0x%02x)", shift, mask);
 	} else {
 		WRITE(p, "  index = (index & 0x%02x)", mask);
 	}
@@ -251,7 +252,7 @@ void GenerateDepalShaderFloat(char *buffer, GEBufferFormat pixelFormat, ShaderLa
 			WRITE(p, "#version 100\n");
 			WRITE(p, "precision mediump float;\n");
 		} else {
-			WRITE(p, "#version 110\n");
+			WRITE(p, "#version %d\n", gl_extensions.GLSLVersion());
 		}
 		WRITE(p, "varying vec2 v_texcoord0;\n");
 		WRITE(p, "uniform sampler2D tex;\n");
@@ -285,6 +286,9 @@ void GenerateDepalShader(char *buffer, GEBufferFormat pixelFormat, ShaderLanguag
 	case HLSL_DX9:
 		GenerateDepalShaderFloat(buffer, pixelFormat, language);
 		break;
+	case HLSL_D3D11_LEVEL9:
+	default:
+		_assert_msg_(G3D, false, "Depal shader language not supported: %d", (int)language);
 	}
 }
 

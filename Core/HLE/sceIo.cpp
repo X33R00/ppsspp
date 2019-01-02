@@ -24,6 +24,7 @@
 
 #include "Core/Core.h"
 #include "Core/Config.h"
+#include "Core/ConfigValues.h"
 #include "Core/Debugger/Breakpoints.h"
 #include "Core/ELF/ParamSFO.h"
 #include "Core/MemMapHelpers.h"
@@ -496,10 +497,12 @@ static void __IoManagerThread() {
 	}
 }
 
-static void __IoWakeManager() {
+static void __IoWakeManager(CoreLifecycle stage) {
 	// Ping the thread so that it knows to check coreState.
-	ioManagerThreadEnabled = false;
-	ioManager.FinishEventLoop();
+	if (stage == CoreLifecycle::STOPPING) {
+		ioManagerThreadEnabled = false;
+		ioManager.FinishEventLoop();
+	}
 }
 
 static void __IoVblank() {
@@ -586,7 +589,7 @@ void __IoInit() {
 	ioManagerThreadEnabled = g_Config.bSeparateIOThread;
 	ioManager.SetThreadEnabled(ioManagerThreadEnabled);
 	if (ioManagerThreadEnabled) {
-		Core_ListenShutdown(&__IoWakeManager);
+		Core_ListenLifecycle(&__IoWakeManager);
 		ioManagerThread = new std::thread(&__IoManagerThread);
 		ioManagerThread->detach();
 	}
@@ -988,7 +991,7 @@ static u32 sceIoReadAsync(int id, u32 data_addr, int size) {
 		int us;
 		bool complete = __IoRead(result, id, data_addr, size, us);
 		if (complete) {
-			f->asyncResult = result;
+			f->asyncResult = (s64)result;
 			DEBUG_LOG(SCEIO, "%llx=sceIoReadAsync(%d, %08x, %x)", f->asyncResult, id, data_addr, size);
 		} else {
 			DEBUG_LOG(SCEIO, "sceIoReadAsync(%d, %08x, %x): deferring result", id, data_addr, size);
@@ -1122,7 +1125,7 @@ static u32 sceIoWriteAsync(int id, u32 data_addr, int size) {
 		int us;
 		bool complete = __IoWrite(result, id, data_addr, size, us);
 		if (complete) {
-			f->asyncResult = result;
+			f->asyncResult = (s64)result;
 			DEBUG_LOG(SCEIO, "%llx=sceIoWriteAsync(%d, %08x, %x)", f->asyncResult, id, data_addr, size);
 		} else {
 			DEBUG_LOG(SCEIO, "sceIoWriteAsync(%d, %08x, %x): deferring result", id, data_addr, size);
@@ -1932,7 +1935,7 @@ static u32 sceIoOpenAsync(const char *filename, int flags, int mode)
 		f = new FileNode();
 		f->handle = kernelObjects.Create(f);
 		f->fullpath = filename;
-		f->asyncResult = error == 0 ? SCE_KERNEL_ERROR_ERRNO_FILE_NOT_FOUND : error;
+		f->asyncResult = error == 0 ? (s64)SCE_KERNEL_ERROR_ERRNO_FILE_NOT_FOUND : (s64)error;
 		f->closePending = true;
 
 		fd = __IoAllocFd(f);

@@ -213,6 +213,7 @@ VkResult VulkanContext::CreateInstance(const CreateInfo &info) {
 
 	assert(gpu_count > 0);
 	physical_devices_.resize(gpu_count);
+	physicalDeviceProperties_.resize(gpu_count);
 	res = vkEnumeratePhysicalDevices(instance_, &gpu_count, physical_devices_.data());
 	if (res != VK_SUCCESS) {
 		init_error_ = "Failed to enumerate physical devices";
@@ -221,6 +222,9 @@ VkResult VulkanContext::CreateInstance(const CreateInfo &info) {
 		return res;
 	}
 
+	for (uint32_t i = 0; i < gpu_count; i++) {
+		vkGetPhysicalDeviceProperties(physical_devices_[i], &physicalDeviceProperties_[i]);
+	}
 	return VK_SUCCESS;
 }
 
@@ -417,6 +421,14 @@ bool VulkanContext::CheckLayers(const std::vector<LayerProperties> &layer_props,
 	return true;
 }
 
+int VulkanContext::GetPhysicalDeviceByName(std::string name) {
+	for (size_t i = 0; i < physical_devices_.size(); i++) {
+		if (physicalDeviceProperties_[i].deviceName == name)
+			return (int)i;
+	}
+	return -1;
+}
+
 int VulkanContext::GetBestPhysicalDevice() {
 	// Rules: Prefer discrete over embedded.
 	// Prefer nVidia over Intel.
@@ -432,11 +444,16 @@ int VulkanContext::GetBestPhysicalDevice() {
 		case VK_PHYSICAL_DEVICE_TYPE_CPU:
 			score += 1;
 			break;
+		case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+			score += 2;
+			break;
 		case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
 			score += 20;
 			break;
 		case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
 			score += 10;
+			break;
+		default:
 			break;
 		}
 		if (props.vendorID == VULKAN_VENDOR_AMD) {
@@ -490,7 +507,6 @@ void VulkanContext::ChooseDevice(int physical_device) {
 
 	// This is as good a place as any to do this
 	vkGetPhysicalDeviceMemoryProperties(physical_devices_[physical_device_], &memory_properties);
-	vkGetPhysicalDeviceProperties(physical_devices_[physical_device_], &gpu_props);
 
 	// Optional features
 	vkGetPhysicalDeviceFeatures(physical_devices_[physical_device_], &featuresAvailable_);
@@ -1024,6 +1040,8 @@ bool GLSLtoSPV(const VkShaderStageFlagBits shader_type,
 
 	glslang::TProgram program;
 	const char *shaderStrings[1];
+	EProfile profile = ECoreProfile;
+	int defaultVersion = 450;
 	TBuiltInResource Resources;
 	init_resources(Resources);
 
@@ -1036,7 +1054,7 @@ bool GLSLtoSPV(const VkShaderStageFlagBits shader_type,
 	shaderStrings[0] = pshader;
 	shader.setStrings(shaderStrings, 1);
 
-	if (!shader.parse(&Resources, 100, false, messages)) {
+	if (!shader.parse(&Resources, defaultVersion, profile, false, true, messages)) {
 		puts(shader.getInfoLog());
 		puts(shader.getInfoDebugLog());
 		if (errorMessage) {
@@ -1060,7 +1078,11 @@ bool GLSLtoSPV(const VkShaderStageFlagBits shader_type,
 	}
 
 	// Can't fail, parsing worked, "linking" worked.
-	glslang::GlslangToSpv(*program.getIntermediate(stage), spirv);
+	glslang::SpvOptions options;
+	options.disableOptimizer = false;
+	options.optimizeSize = false;
+	options.generateDebugInfo = false;
+	glslang::GlslangToSpv(*program.getIntermediate(stage), spirv, &options);
 	return true;
 }
 

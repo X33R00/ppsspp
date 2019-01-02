@@ -676,7 +676,7 @@ bool PipelineManagerVulkan::LoadCache(FILE *file, bool loadRawPipelineCache, Sha
 			WARN_LOG(G3D, "Bad Vulkan pipeline cache header - ignoring");
 			return false;
 		}
-		if (0 != memcmp(header->uuid, vulkan_->GetPhysicalDeviceProperties().pipelineCacheUUID, VK_UUID_SIZE)) {
+		if (0 != memcmp(header->uuid, vulkan_->GetPhysicalDeviceProperties(vulkan_->GetCurrentPhysicalDevice()).pipelineCacheUUID, VK_UUID_SIZE)) {
 			// Wrong hardware/driver/etc.
 			WARN_LOG(G3D, "Bad Vulkan pipeline cache UUID - ignoring");
 			return false;
@@ -709,7 +709,7 @@ bool PipelineManagerVulkan::LoadCache(FILE *file, bool loadRawPipelineCache, Sha
 
 	NOTICE_LOG(G3D, "Creating %d pipelines...", size);
 	for (uint32_t i = 0; i < size; i++) {
-		if (failed) {
+		if (failed || cancelCache_) {
 			break;
 		}
 		StoredVulkanPipelineKey key;
@@ -741,4 +741,8 @@ bool PipelineManagerVulkan::LoadCache(FILE *file, bool loadRawPipelineCache, Sha
 	}
 	NOTICE_LOG(G3D, "Recreated Vulkan pipeline cache (%d pipelines).", (int)size);
 	return true;
+}
+
+void PipelineManagerVulkan::CancelCache() {
+	cancelCache_ = true;
 }

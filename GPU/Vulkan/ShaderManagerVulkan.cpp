@@ -25,6 +25,7 @@
 #include "math/math_util.h"
 #include "math/dataconv.h"
 #include "profiler/profiler.h"
+#include "thin3d/thin3d.h"
 #include "util/text/utf8.h"
 #include "Common/Vulkan/VulkanContext.h"
 #include "Common/Vulkan/VulkanMemory.h"
@@ -156,10 +157,10 @@ std::string VulkanVertexShader::GetShaderString(DebugShaderStringType type) cons
 	}
 }
 
-ShaderManagerVulkan::ShaderManagerVulkan(VulkanContext *vulkan)
-	: vulkan_(vulkan), lastVShader_(nullptr), lastFShader_(nullptr), fsCache_(16), vsCache_(16) {
+ShaderManagerVulkan::ShaderManagerVulkan(Draw::DrawContext *draw, VulkanContext *vulkan)
+	: ShaderManagerCommon(draw), vulkan_(vulkan), lastVShader_(nullptr), lastFShader_(nullptr), fsCache_(16), vsCache_(16) {
 	codeBuffer_ = new char[16384];
-	uboAlignment_ = vulkan_->GetPhysicalDeviceProperties().limits.minUniformBufferOffsetAlignment;
+	uboAlignment_ = vulkan_->GetPhysicalDeviceProperties(vulkan_->GetCurrentPhysicalDevice()).limits.minUniformBufferOffsetAlignment;
 	memset(&ub_base, 0, sizeof(ub_base));
 	memset(&ub_lights, 0, sizeof(ub_lights));
 	memset(&ub_bones, 0, sizeof(ub_bones));
@@ -174,9 +175,10 @@ ShaderManagerVulkan::~ShaderManagerVulkan() {
 	delete[] codeBuffer_;
 }
 
-void ShaderManagerVulkan::DeviceRestore(VulkanContext *vulkan) {
+void ShaderManagerVulkan::DeviceRestore(VulkanContext *vulkan, Draw::DrawContext *draw) {
 	vulkan_ = vulkan;
-	uboAlignment_ = vulkan_->GetPhysicalDeviceProperties().limits.minUniformBufferOffsetAlignment;
+	draw_ = draw;
+	uboAlignment_ = vulkan_->GetPhysicalDeviceProperties(vulkan_->GetCurrentPhysicalDevice()).limits.minUniformBufferOffsetAlignment;
 }
 
 void ShaderManagerVulkan::Clear() {
@@ -238,7 +240,7 @@ void ShaderManagerVulkan::GetShaders(int prim, u32 vertType, VulkanVertexShader 
 	FShaderID FSID;
 	if (gstate_c.IsDirty(DIRTY_FRAGMENTSHADER_STATE)) {
 		gstate_c.Clean(DIRTY_FRAGMENTSHADER_STATE);
-		ComputeFragmentShaderID(&FSID);
+		ComputeFragmentShaderID(&FSID, draw_->GetBugs());
 	} else {
 		FSID = lastFSID_;
 	}
@@ -268,8 +270,9 @@ void ShaderManagerVulkan::GetShaders(int prim, u32 vertType, VulkanVertexShader 
 
 	VulkanFragmentShader *fs = fsCache_.Get(FSID);
 	if (!fs) {
+		uint32_t vendorID = vulkan_->GetPhysicalDeviceProperties(vulkan_->GetCurrentPhysicalDevice()).vendorID;
 		// Fragment shader not in cache. Let's compile it.
-		GenerateVulkanGLSLFragmentShader(FSID, codeBuffer_);
+		GenerateVulkanGLSLFragmentShader(FSID, codeBuffer_, vendorID);
 		fs = new VulkanFragmentShader(vulkan_, FSID, codeBuffer_);
 		fsCache_.Insert(FSID, fs);
 	}
@@ -358,7 +361,7 @@ VulkanFragmentShader *ShaderManagerVulkan::GetFragmentShaderFromModule(VkShaderM
 // instantaneous.
 
 #define CACHE_HEADER_MAGIC 0xff51f420 
-#define CACHE_VERSION 14
+#define CACHE_VERSION 15
 struct VulkanCacheHeader {
 	uint32_t magic;
 	uint32_t version;
@@ -389,13 +392,14 @@ bool ShaderManagerVulkan::LoadCache(FILE *f) {
 		VulkanVertexShader *vs = new VulkanVertexShader(vulkan_, id, codeBuffer_, useHWTransform);
 		vsCache_.Insert(id, vs);
 	}
+	uint32_t vendorID = vulkan_->GetPhysicalDeviceProperties(vulkan_->GetCurrentPhysicalDevice()).vendorID;
 	for (int i = 0; i < header.numFragmentShaders; i++) {
 		FShaderID id;
 		if (fread(&id, sizeof(id), 1, f) != 1) {
 			ERROR_LOG(G3D, "Vulkan shader cache truncated");
 			break;
 		}
-		GenerateVulkanGLSLFragmentShader(id, codeBuffer_);
+		GenerateVulkanGLSLFragmentShader(id, codeBuffer_, vendorID);
 		VulkanFragmentShader *fs = new VulkanFragmentShader(vulkan_, id, codeBuffer_);
 		fsCache_.Insert(id, fs);
 	}
